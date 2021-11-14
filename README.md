@@ -132,12 +132,12 @@ Pre-requisities:
 
 	```
 	python predict.py \
- --model exported_model \
- --labels records_dir/classes.pbtxt \
- --images "image1, image2" 
- --output_dir "results" \
- --output_file_prefix "result"
- --min_confidence 0.5
+	 --model exported_model \
+	 --labels records_dir/classes.pbtxt \
+	 --images "image1, image2" 
+	 --output_dir "results" \
+	 --output_file_prefix "result"
+	 --min_confidence 0.5
 	```
 	The script detects and localizes the found objects within each image by drawing bounding boxes and class label for each of them.
 
@@ -168,5 +168,10 @@ Below are some samples of inference for a model trained on the [LISA Traffic sig
 	```
 
 
-### Ref
+### References
 
+[Prepare the dataset]
+
+[List of models]
+
+[sample TFOD project]
