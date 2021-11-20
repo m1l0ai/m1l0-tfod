@@ -42,12 +42,25 @@ It also includes a set of terraform scripts to help with AWS deployment.
 
 	docker run \
 	--gpus all \
-	--rm -v "${LOCAL_DATA_PATH}":/opt/tfod/records -v"${LOCAL_SAVED_MODEL_PATH}":/opt/tfod/experiments/exported_model m1l0/tfod:latest "models" "experiments/training" "experiments/exported_model" "records" "Faster R-CNN ResNet101 V1 800x1333" 3 600 1024 50000 1 955
+	--rm \
+	-p 6006:6006 \
+	-v"${LOCAL_CONFIG_FILES}":/opt/tfod/configs \
+	-v"${LOCAL_DATA_PATH}":/opt/tfod/records \ -v"${LOCAL_SAVED_MODEL_PATH}":/opt/tfod/experiments/exported_model \
+	m1l0/tfod:latest \
+	"models" \
+	"experiments/training" \
+	"experiments/exported_model" \
+	"records" \
+	"Faster R-CNN ResNet101 V1 800x1333" \
+	configs/training.config \
+	configs/traininghparams.json
 	```
 
-	The docker image has a working dir of **/opt/tfod** and the above binds the local records dir into **/opt/tfod/records**
+	The docker image has a working dir of **/opt/tfod** and the above binds the local records dir into **/opt/tfod/records**; the saved model path into **/opt/tfod/experiments/exported_model** and the config files into **/opt/tfod/configs**
 
-	The arguments are passed to `train.sh` and as follows:
+	It also starts Tensorboard on port 6006 which you can view via localhost.
+
+	The arguments are passed to `train.sh` as follows:
 	* "models": dir of cloned tfod models repo in container
 	* "experiments/training": working dir to store model checkpoints
 	* "experiments/exported_model": directory where exported model after training is saved
@@ -56,19 +69,52 @@ It also includes a set of terraform scripts to help with AWS deployment.
 	The remaining arguments are used by `readconfig.py` to generate a custom training config file:
 
 	* "Faster R-CNN ResNet101 V1 800x1333": name of pretrained model to use. Refer to the following [List of models]
-	* "3": Number of class labels
-	* "600": Min dimension to resize images to
-	* "1024": Max dimension to resize images to
-	* "50000": Number of training steps
-	* "1": Batch size. Set this to match number of GPU
-	* "955": Size of test set.
+
+	* "training.config": Custom config file to overwrite the default provided model config. It not provided, the training will use the default provided. e.g:
+	```
+	  train_config: {
+		  optimizer: {
+		    momentum_optimizer: {
+		      learning_rate: {
+		        manual_step_learning_rate {
+		          initial_learning_rate: 0.0003
+		          schedule {
+		            step: 900000
+		            learning_rate: .00003
+		          }
+		          schedule {
+		            step: 1200000
+		            learning_rate: .000003
+		          }
+		        }
+		      }
+		      momentum_optimizer_value: 0.9
+		    }
+		    use_moving_average: false
+		  }
+		}
+	```
+
+	* "traininghparams.json": JSON dict of model's hyper parameters to overwrite during training. e.g:
+	```
+		{
+		  "num_classes": 3,
+		  "batch_size": 1,
+		  "train_steps": 50000,
+		  "num_examples": 955,
+		  "learning_rate": 0.0003,
+		  "fine_tune_checkpoint_type": "detection"
+		}
+	```
+
+	The `readconfig.py script` will merge the above and create a custom training config file
 
 
 ### AWS Setup
 
 For training on ECS, the terraform scripts create the following resources:
 
-* Custom VPC with 1 public subnet, 3 private subnets
+* Custom VPC with 1 public subnet, 1 private subnets
 * ECS cluster
 * Required security groups and IAM roles
 * 1 EC2 GPU container instance
@@ -78,6 +124,8 @@ Pre-requisities:
 
 * Build and deploy the m1l0/tfod image using the dockerfile provided.
 
+* Upload the local training config and hparams json files into an s3 bucket
+
 * The [M1L0 Artifacts sidecar] image is defined in the task defintion via config.tfvars and will be used as sidecar container to backup training artifacts to S3
 
 * Edit `terraform/config.tfvars` with the right parameters.
@@ -86,9 +134,16 @@ Pre-requisities:
 
 * Run `make apply` to provision the resources
 
-* Once the container instance has connected to the cluster ( check the ECS Agent tab for the cluster), run `make runtask` which invokes `runtask.sh` which creates a training task based on the task definition provided above.
+* Check the container instance has connected to the cluster ( check the ECS Agent tab for the cluster). This may take a few minutes depending on the ec2 instance type
 
-	The script by default tails the training logs of the main TFOD container.
+* Run `make runtask-config` to generate a configs.json file in the local working directory
+
+* Run `runtask.sh` with the following parameters:
+	```
+	./runtask.sh configs.json s3://<records_bucket> "Faster R-CNN ResNet101 V1 800x1333" s3://<train config file> s3://<model hparams config file>
+	```
+
+	The script will create an ECS task; sets up local port forwarding to access Tensorboard using SSM; and tails the training logs.
 
 	**NOTE** The script does not exit even if logs have stopped. You need to exit the script manually. 
 
@@ -118,7 +173,18 @@ Pre-requisities:
 	...
 	```
 
-* Check the backup_target specified for the artifacts. You should see 2 subfolders in the bucket: `training` and `exported_model`
+	The `runtask.sh` script creates a local port for viewing the remote tensorboard instance using SSM:
+	```
+	aws ssm start-session --target ${container_id} --document-name AWS-StartPortForwardingSession --parameters '{"portNumber":["6006"], "localPortNumber":["6006"]}'
+	```
+
+	You can open a browser window to localhost:6006 to view tensorboard data. Note that it may take a while before any data shows up. Please note that at this point, tensorboard is running remotely on the container instance, not on localhost itself. Below are some screenshots of port forwarding from remote to localhost:
+
+	![Tensorboard on localhost](examples/tfboard1.png)
+	![Tensorboard on localhost](examples/tfboard2.png)
+
+
+* Check the backup_target specified for the artifacts in config.tfvars. You should see 2 subfolders in the bucket: `training` and `exported_model`
 
 	The `exported_model` contains the final trained model.
 
@@ -150,8 +216,7 @@ Below are some samples of inference for a model trained on the [LISA Traffic sig
 
 ### Issues
 
-* **NOTE**: Sometimes the provision of p3 ec2 instances might fail due to insufficient resources in the AZ. Change the subnet_id in the ecs instance block in `main.tf` until it works. As of this writing, I am unable to provision beyond `p3.2xlarge` instances
-
+* **NOTE**: Sometimes the provision of p3 ec2 instances might fail due to insufficient resources in the AZ. Change the subnet_id in the ecs instance block in `main.tf` until it works. As of this writing, I am unable to provision beyond `p3.2xlarge` instances.
 
 * The ecs instance profile may already exists so need to delete it if it does:
 
@@ -166,6 +231,8 @@ Below are some samples of inference for a model trained on the [LISA Traffic sig
 	```
 	ValueError: The `global_batch_size` 1 is not divisible by `num_replicas_in_sync` 4 
 	```
+
+* Multi-gpu training is still not possible with v2 version. It fails remotely with `NCCL issues` ??
 
 
 ### References

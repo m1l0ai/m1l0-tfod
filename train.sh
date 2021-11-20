@@ -113,11 +113,11 @@ download_pretrained_models() {
 }
 
 
-# usage: ./train.sh models lisa/experiments/training lisa/experiments/exported_model lisa/records "Faster R-CNN ResNet101 V1 800x1333" <num_classes> <min_dim> <max_dim> <num_steps> <batch_size> <num_test_examples>
+# usage: ./train.sh models lisa/experiments/training lisa/experiments/exported_model lisa/records "Faster R-CNN ResNet101 V1 800x1333" <model_config_override> <hyper_params.json>
 
-if [[ $# -ne 11 ]]; then
+if [[ $# -ne 7 ]]; then
 	echo "Incorrect usage!"
-	echo "Usage: $0 <tfod_source_dir> <model_training_dir> <model_export_dir> <records_dir> <pretrained_model_dir> <num_classes> <min_dim> <max_dim> <num_steps> <batch_size> <num_test_samples>"
+	echo "Usage: $0 <tfod_source_dir> <model_training_dir> <model_export_dir> <records_dir> <pretrained_model_name> <model_config_override> <hyper_params.json>"
 	exit 1
 fi
 
@@ -126,6 +126,8 @@ currentdir=$(pwd)
 tfod_dir=${currentdir}/${1}
 model_dir=${currentdir}/${2}
 exported_dir=${currentdir}/${3}
+# generated config file path
+pipeline_config="${model_dir}/pipeline.config"
 
 if [[ ${4} == *"s3"* ]]; then
 	records_dir=${4}
@@ -133,15 +135,8 @@ else
   records_dir=${currentdir}/${4}
 fi
 
-# generated config file path
-pipeline_config="${model_dir}/pipeline.config"
-
-num_classes=${6}
-min_dim=${7}
-max_dim=${8}
-num_steps=${9}
-batch_size=${10}
-num_examples=${11}
+model_config=${6}
+hparams_config=${7}
 
 echo "Current dir is: ${currentdir}"
 echo "TFOD Models dir is: ${tfod_dir}"
@@ -196,13 +191,32 @@ if [[ $records_dir == *"s3"* ]]; then
 	export RECORDS_DIR="${RECORDS_PATH}"
 fi
 
+
+# TODO: FIx
+if [[ $hparams_config == *"s3"* ]]; then
+  echo "Found hparams file in s3"
+  hparams_tmp="/tmp/hparams.json"
+  aws s3 cp ${hparams_config} ${hparams_tmp}
+  hparams_config=$hparams_tmp
+fi
+
+if [[ $model_config == *"s3"* ]]; then
+  echo "Found model config file in s3"
+  config_tmp="/tmp/model.config"
+  aws s3 cp ${model_config} ${config_tmp}
+  model_config=$config_tmp
+fi
+
+num_steps=$(cat ${hparams_config} | jq -r '.train_steps')
+echo "NUM STEPS: ${num_steps}"
+
 echo "Generating config file for training..."
-python3 readconfig.py --num_classes=${num_classes} \
-                      --min_dim=${min_dim} \
-		                  --max_dim=${max_dim} \
-		                  --num_steps=${num_steps} \
-		                  --batch_size=${batch_size} \
-		                  --num_examples=${num_examples}
+python3 readconfig.py --override=${model_config} \
+                      --hparams=${hparams_config}
+
+echo "Running Tensorboard in background..."
+tensorboard --logdir "${MODEL_DIR}" --port 6006 --host 0.0.0.0 &
+TFBOARD_PID=$!
 
 echo "Starting training process..."
 python3 models/research/object_detection/model_main_tf2.py \
@@ -227,3 +241,6 @@ python3 models/research/object_detection/exporter_main_v2.py \
 	--pipeline_config_path "${PIPELINE_CONFIG_PATH}" \
 	--trained_checkpoint_dir "${MODEL_DIR}" \
 	--output_directory "${EXPORTED_DIR}"
+
+
+kill -09 ${TFBOARD_PID}

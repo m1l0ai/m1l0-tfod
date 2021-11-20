@@ -114,36 +114,6 @@ variable "num_classes" {
   default     = 1
 }
 
-variable "min_dim" {
-  description = "Minimum dimension for input image"
-  type        = number
-  default     = 600
-}
-
-variable "max_dim" {
-  description = "Maximum dimension for input image"
-  type        = number
-  default     = 1024
-}
-
-variable "num_steps" {
-  description = "Num of training epochs"
-  type        = number
-  default     = 50000
-}
-
-variable "batch_size" {
-  description = "Training Batch size"
-  type        = number
-  default     = 1
-}
-
-variable "num_examples" {
-  description = "Num of samples for evaluation"
-  type        = number
-  default     = 1
-}
-
 variable "backup_image" {
   description = "Docker image name for backing up artifacts"
   type        = string
@@ -162,14 +132,20 @@ variable "exported_bucket" {
   default     = ""
 }
 
-variable "pretrained_model" {
-  description = "Name of pre-trained model from TF Model Zoo"
+variable "project_name" {
+  description = "Name for project"
+  type        = string
+  default     = "object-detector"
+}
+
+variable "project_id" {
+  description = "Unique (uuid)/string for project subdir. Used to store artifacts in S3"
   type        = string
   default     = ""
 }
 
-variable "records_uri" {
-  description = "URI of records for training and testing"
-  type        = string
-  default     = ""
+variable "subnet_id" {
+  description = "IDX of private subnet to choose for running container instance"
+  type        = number
+  default     = 0
 }

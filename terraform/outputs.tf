@@ -26,5 +26,5 @@ output "profile" {
 
 output "log_group" {
   description = "Cloudwatch Log Group name"
-  value = aws_cloudwatch_log_group.main.name
+  value       = aws_cloudwatch_log_group.main.name
 }
