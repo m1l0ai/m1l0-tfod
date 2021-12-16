@@ -25,7 +25,50 @@ It also includes a set of terraform scripts to help with AWS deployment.
 **NOTE** There is no support for the preparation of datasets for training with TFOD as its impossible to preempt how the dataset is annotated, in what format, and how to extract the bounding box target values. As such I refer you to the [Prepare the dataset] section on the TFOD documentation or refer to this [sample TFOD project] for more ideas.
 
 
-### Local Setup
+### Local Manual Setup
+
+This involves cloning this repository and using it as a new project base
+
+
+The steps are as follows:
+
+* Clone this repo and cd into it
+
+* Clone the TF models repo:
+	```
+	git clone https://github.com/tensorflow/models.git
+
+	git config submodule.models.ignore all
+
+	cd models/research/
+
+	protoc object_detection/protos/*.proto --python_out=.
+
+	cp object_detection/packages/tf2/setup.py .
+
+	python3 -m venv myvenv && source myvenv/bin/activate
+
+	python3 -m pip install .
+
+	# if no errors then it works...
+	python object_detection/builders/model_builder_tf2_test.py
+	```
+
+* [Prepare the dataset] as documented
+
+* Create separate local dirs for training, exported model and for the TFRecords.
+
+* The train.sh script will automatically use the default training config if no overrides is given. If you need to overrwrite sections of the config, you need to provide a config override file and a hyperparams override in json
+
+* Run **train.sh** manually:
+	```
+	./train.sh models <model training dir> <exported_model_directory> <tf records dir> "<model name>" <training config overrides>.config <training params overrides>.json
+	```
+
+* A separate instance of Tensorboard will also be running in the background at port 6006
+
+
+### Local Docker Setup
 
 * Build the image and push it to AWS ECR / Dockerhub or use it locally.
 
@@ -215,6 +258,17 @@ Below are some samples of inference for a model trained on the [LISA Traffic sig
 
 
 ### Issues
+
+* Note that when using manual local setup, the `python3 -m pip install .` will cause `opencv-headless` to also be installed. Need to remove it if running on desktop and reinstall `opencv-contrib-python`
+
+
+* If you are cloning this repo and using it as a base project, you need to ignore the clone models submodule:
+	```
+	git config submodule.models.ignore all
+	```
+
+* Note that the **batch_size** must match the num of GPUs/TPUs 
+
 
 * **NOTE**: Sometimes the provision of p3 ec2 instances might fail due to insufficient resources in the AZ. Change the subnet_id in the ecs instance block in `main.tf` until it works. As of this writing, I am unable to provision beyond `p3.2xlarge` instances.
 
